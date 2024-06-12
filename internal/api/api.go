@@ -1,13 +1,21 @@
 package api
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"regexp"
+	"strings"
+
 	"github.com/benjaminchristie/go-arxiv-tree/internal/cache"
 )
+
+var tarExtractRegexpHelper *regexp.Regexp
 
 // see https://info.arxiv.org/help/api/user-manual.html
 type QueryRequest struct {
@@ -23,6 +31,11 @@ const ARXIV_API = "https://export.arxiv.org/api"
 var queryCache *cache.Cache
 
 func init() {
+	var err error
+	tarExtractRegexpHelper, err = regexp.Compile("([a-zA-Z0-9.]+).tar.gz")
+	if err != nil {
+		panic(err)
+	}
 	queryCache = &cache.Cache{}
 }
 
@@ -110,4 +123,96 @@ func genericQuery(methodName string, parameters QueryRequest) (string, error) {
 
 func Query(methodName string, parameters QueryRequest) (string, error) {
 	return genericQuery(methodName, parameters)
+}
+
+// assumes infile is of the form XXX/XXX.tar.gz and XXX are matching (although
+// match is not required) extracts infile to %s/*
+func extractTargz(infile string) error {
+	var err error
+	var r *os.File
+	var gzipStream *gzip.Reader
+	var tarStream *tar.Reader
+	var header *tar.Header
+
+	r, err = os.Open(infile)
+	if err != nil {
+		return err
+	}
+	gzipStream, err = gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	tarStream = tar.NewReader(gzipStream)
+
+	idx := strings.LastIndex(infile, "/")
+	if idx <= 0 {
+		return errors.New("filename does not include directory, ignoring")
+	}
+	dir := infile[0:idx]
+
+	for {
+		header, err = tarStream.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		switch header.Typeflag {
+		case tar.TypeDir:
+			err = os.MkdirAll(fmt.Sprintf("%s/%s", dir, header.Name), 0755)
+			if err != nil {
+				return err
+			}
+		case tar.TypeReg:
+			file, err := os.Create(fmt.Sprintf("%s/%s", dir, header.Name))
+			defer file.Close()
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(file, tarStream)
+			if err != nil {
+				return err
+			}
+		default:
+			return errors.New(fmt.Sprintf("Unknown type in extractTargz: %v in %s", header.Typeflag, header.Name))
+		}
+	}
+	return nil
+}
+
+// performs download and extraction of remote arxiv
+// source to client. Extracted files are in ./id/*
+func DownloadSource(id string) (string, error) {
+	var err error
+	var resp *http.Response
+	var body []byte
+
+	res := tarExtractRegexpHelper.FindStringSubmatch(id)
+	if len(res) != 2 {
+		return "", errors.New(fmt.Sprintf("Unable to find match for regexp in DownloadSource for %s", id))
+	}
+	s := res[1]
+	err = os.MkdirAll(s, 0755)
+	if err != nil {
+		return "", err
+	}
+	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/src/%s", s))
+	if err != nil {
+		return "", err
+	}
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	archive := fmt.Sprintf("%s/%s.tar.gz", s, s)
+	err = os.WriteFile(archive, body, 0644)
+	if err != nil {
+		return "", err
+	}
+	err = extractTargz(archive)
+	if err != nil {
+		return "", err
+	}
+	return archive, nil
 }
