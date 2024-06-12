@@ -8,11 +8,11 @@ import (
 )
 
 func main() {
-	_, err := api.DownloadSource("2404.17906.tar.gz")
+	_, err := api.DownloadSource("2304.08539.tar.gz")
 	if err != nil {
 		panic(err)
 	}
-	bs, err := tree.ReadBibtexFile("2404.17906/citations.bib")
+	bs, err := tree.ReadBibtexFile("2304.08539/citations.bib")
 	if err != nil {
 		panic(err)
 	}
@@ -26,6 +26,8 @@ func main() {
 	// }
 	err = tree.Visualize(t, "out.gv")
 	log.Printf("%v", err)
+	log.Printf("Downloading pdfs...")
+	tree.TraverseDownloadPDF(t, "pdfs")
 	// for _, b := range bs {
 	// 	author := b.Tags[bibtex.FieldAuthor].(*ast.UnparsedText)
 	// 	title := b.Tags[bibtex.FieldTitle].(*ast.UnparsedText)

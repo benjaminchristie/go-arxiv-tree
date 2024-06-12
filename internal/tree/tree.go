@@ -28,9 +28,9 @@ func init() {
 	biber = &bibtex.Biber{}
 	N := runtime.GOMAXPROCS(0)
 	workerPool = make(chan bool, N)
-	for range N {
-		workerPool <- true
-	}
+	// for range N {
+	// 	workerPool <- true
+	// }
 }
 
 func getCitations(e bibtex.Entry) ([]bibtex.Entry, error) {
@@ -174,9 +174,54 @@ func recPopulateTree(n *Node, depth int, doLog bool, wg *sync.WaitGroup) {
 	helper(n)
 	for _, child := range n.Cites {
 		wg.Add(1)
+		workerPool<-true
 		go func(c *Node) {
 			recPopulateTree(c, depth-1, doLog, wg)
+			<-workerPool
 			wg.Done()
 		}(child)
 	}
+}
+
+func TraverseDownloadPDF(node *Node, outdir string) {
+	var wg sync.WaitGroup
+	os.MkdirAll(outdir, 0755)
+	f := func(n *Node) error {
+		if n == nil {
+			return nil
+		}
+		_, t, _ := api.QueryBibtexEntry(n.Entry)
+		p := api.QueryRequest{
+			SearchQuery: fmt.Sprintf("ti:%s", t),
+		}
+		x, err := api.Query("query", p)
+		if err != nil {
+			return err
+		}
+		s := parser.ParseXML(x)
+		if len(s) == 0 {
+			return errors.New("Empty XML")
+		}
+		true_id := s[0].Id[strings.LastIndex(s[0].Id, "/")+1:]
+		log.Printf("Downloading %s", true_id)
+		err = api.DownloadPDF(true_id+".tar.gz", fmt.Sprintf("%s/%s.pdf", outdir, t))
+		return err
+	}
+	var g func(n *Node)
+	g = func(n *Node) {
+		for _, child := range n.Cites {
+			wg.Add(2)
+			workerPool<-true
+			go func(c *Node) {
+				f(c)
+				wg.Done()
+				g(c)
+				wg.Done()
+				<-workerPool
+			}(child)
+		}
+	}
+	f(node)
+	g(node)
+	wg.Wait()
 }

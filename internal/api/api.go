@@ -204,6 +204,36 @@ func extractTargz(infile string) error {
 	return nil
 }
 
+func DownloadPDF(targzfile, outfile string) (error) {
+	var err error
+	var resp *http.Response
+	var body []byte
+
+	res := tarExtractRegexpHelper.FindStringSubmatch(targzfile)
+	if len(res) != 2 {
+		return errors.New(fmt.Sprintf("Unable to find match for regexp in DownloadSource for %s", targzfile))
+	}
+	s := res[1]
+	err = os.MkdirAll(s, 0755)
+	if err != nil {
+		return err
+	}
+	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/pdf/%s", s))
+	if err != nil {
+		return err
+	}
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(outfile, body, 0644)
+	if err != nil {
+		os.Remove(outfile)
+		return err
+	}
+	return nil
+}
+
 // performs download and extraction of remote arxiv
 // source to client. Extracted files are in ./id/*
 func DownloadSource(targzfile string) (string, error) {

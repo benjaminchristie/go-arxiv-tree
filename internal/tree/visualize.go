@@ -29,6 +29,10 @@ func traversal(n *Node, visitedNodes *[]*Node, pstr string, cb func(*Node, strin
 }
 
 func Visualize(n *Node, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
 	g := graph.New(graph.StringHash, graph.Directed())
 	cb := func(c *Node, pstr string) string {
 		_, t, err := api.QueryBibtexEntry(c.Entry)
@@ -46,7 +50,6 @@ func Visualize(n *Node, filename string) error {
 	visitedNodes := make([]*Node, 0)
 	g.AddVertex(t)
 	traversal(n, &visitedNodes, t, cb)
-	file, _ := os.Create(filename)
 	err = draw.DOT(g, file)
 	return err
 }
