@@ -33,11 +33,11 @@ type Host struct {
 	Entries []Entry `xml:"entry"`
 }
 
-func ParseXML(s string) *[]Entry {
+func ParseXML(s string) []Entry {
 	host := Host{}
 	err := xml.Unmarshal([]byte(s), &host)
 	if err != nil {
 		log.Printf("Error unmarshalling field %v", err)
 	}
-	return &(host.Entries)
+	return host.Entries
 }

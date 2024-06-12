@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
 
 	"github.com/benjaminchristie/go-arxiv-tree/internal/cache"
+	"github.com/jschaf/bibtex"
+	"github.com/jschaf/bibtex/ast"
 )
 
 var tarExtractRegexpHelper *regexp.Regexp
@@ -98,13 +100,12 @@ func genericQuery(methodName string, parameters QueryRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("%s/%s?%s", ARXIV_API, methodName, s)
-	log.Printf("Querying %s", url)
-	t = queryCache.Get(url)
+	req_url := fmt.Sprintf("%s/%s?%s", ARXIV_API, methodName, url.PathEscape(s))
+	t = queryCache.Get(req_url)
 	if t != nil {
 		return t.(string), nil
 	}
-	resp, err := http.Get(url)
+	resp, err := http.Get(req_url)
 	if err != nil {
 		return "", err
 	}
@@ -115,7 +116,7 @@ func genericQuery(methodName string, parameters QueryRequest) (string, error) {
 			return "", err
 		}
 		result := string(bodyBytes)
-		queryCache.Set(url, result)
+		queryCache.Set(req_url, result)
 		return result, nil
 	}
 	return "", err
@@ -123,6 +124,28 @@ func genericQuery(methodName string, parameters QueryRequest) (string, error) {
 
 func Query(methodName string, parameters QueryRequest) (string, error) {
 	return genericQuery(methodName, parameters)
+}
+
+// returns author, title, and error
+func QueryBibtexEntry(b bibtex.Entry) (string, string, error) {
+	author, ok := b.Tags[bibtex.FieldAuthor].(*ast.UnparsedText)
+	if !ok {
+		return "", "", errors.New("Conversion error in QueryBibtexEntry")
+	}
+	title, ok := b.Tags[bibtex.FieldTitle].(*ast.UnparsedText)
+	if !ok {
+		return "", "", errors.New("Conversion error in QueryBibtexEntry")
+	}
+	a := author.Value
+	t := title.Value
+	if a == "" || t == "" {
+		return "", "", errors.New("Conversion error in QueryBibtexEntry")
+	}
+	a = strings.Replace(a, "{", "", -1)
+	a = strings.Replace(a, "}", "", -1)
+	t = strings.Replace(t, "{", "", -1)
+	t = strings.Replace(t, "}", "", -1)
+	return a, t, nil
 }
 
 // assumes infile is of the form XXX/XXX.tar.gz and XXX are matching (although
@@ -183,14 +206,14 @@ func extractTargz(infile string) error {
 
 // performs download and extraction of remote arxiv
 // source to client. Extracted files are in ./id/*
-func DownloadSource(id string) (string, error) {
+func DownloadSource(targzfile string) (string, error) {
 	var err error
 	var resp *http.Response
 	var body []byte
 
-	res := tarExtractRegexpHelper.FindStringSubmatch(id)
+	res := tarExtractRegexpHelper.FindStringSubmatch(targzfile)
 	if len(res) != 2 {
-		return "", errors.New(fmt.Sprintf("Unable to find match for regexp in DownloadSource for %s", id))
+		return "", errors.New(fmt.Sprintf("Unable to find match for regexp in DownloadSource for %s", targzfile))
 	}
 	s := res[1]
 	err = os.MkdirAll(s, 0755)
@@ -214,5 +237,6 @@ func DownloadSource(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+
 	return archive, nil
 }
