@@ -4,7 +4,7 @@ import (
 	"sync"
 )
 
-type Cache struct {sync.Map}
+type Cache struct{ sync.Map }
 
 func (c *Cache) Get(k any) any {
 	v, _ := c.Load(k)
@@ -15,6 +15,6 @@ func (c *Cache) Set(k, v any) {
 	c.Store(k, v)
 }
 
-func (c *Cache) Clear(k any){
+func (c *Cache) Clear(k any) {
 	c.Delete(k)
 }
