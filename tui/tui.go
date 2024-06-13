@@ -64,12 +64,23 @@ func listen(t *TUI, onFormSubmitCB func(*TUI, FormData), onUpdateCB func(), onLo
 func formSubmit(t *TUI, f FormData) {
 	var err error
 	t.LogChan <- "Initializing Search Tree"
+
+	defer func() {
+		log.Printf("in defer")
+		go func() {
+			log.Printf("in defer 1")
+			time.Sleep(500 * time.Millisecond)
+			log.Printf("out defer 1")
+			t.LogChan <- "Awaiting new Query"
+		}()
+	}()
+
 	switch f.QueryType {
 	case "ID":
 		t.Head, err = tree.TuiMakeNodeFromID(f.QueryValue, t.NetChan)
 		if err != nil {
 			log.Print(err)
-			t.LogChan <- err.Error()
+			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
 			return
 		}
 		break
@@ -77,7 +88,7 @@ func formSubmit(t *TUI, f FormData) {
 		t.Head, err = tree.TuiMakeNodeFromAuthor(f.QueryValue, t.NetChan)
 		if err != nil {
 			log.Print(err)
-			t.LogChan <- err.Error()
+			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
 			return
 		}
 		break
@@ -85,7 +96,7 @@ func formSubmit(t *TUI, f FormData) {
 		t.Head, err = tree.TuiMakeNodeFromTitle(f.QueryValue, t.NetChan)
 		if err != nil {
 			log.Print(err)
-			t.LogChan <- err.Error()
+			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
 			return
 			// t.App.Stop()
 		}
@@ -111,8 +122,6 @@ func formSubmit(t *TUI, f FormData) {
 		}
 	}
 	tree.AsyncLoggingPopulateTree(t.Head, f.TreeDepth, t.LogChan, t.NetChan, downloadpdf)
-	t.LogChan <- "Awaiting new Query"
-	log.Printf("awaiting new query")
 	// tree.Traverse(t.Head, downloadpdf)
 	// t.LogChan <- "Outputing graph view to %s. Run `dot -Tsvg output.gv -o <file>` to view."
 	// tree.Visualize(t.Head, "output.gv")
@@ -124,11 +133,11 @@ func Run() {
 	treeDepth := 1
 	t := &TUI{
 		App:          tview.NewApplication(),
-		OnUpdate:     make(chan bool, 10),
-		OnFormSubmit: make(chan FormData, 10),
-		LogChan:      make(chan string, 10),
-		PdfChan:      make(chan string, 10),
-		NetChan:      make(chan string, 10),
+		OnUpdate:     make(chan bool, 100),
+		OnFormSubmit: make(chan FormData, 100),
+		LogChan:      make(chan string, 100),
+		PdfChan:      make(chan string, 100),
+		NetChan:      make(chan string, 100),
 	}
 	form := tview.NewForm().
 		AddTextView("ArXiv Tree", "Welcome to ArXiv tree. Enter your search criteria below.", 0, 2, true, false).
@@ -169,6 +178,7 @@ func Run() {
 		}).
 		AddButton("Quit", func() {
 			t.App.Stop()
+			log.Fatalf("Exited program")
 		})
 	form.SetBorder(true).
 		SetTitle("Query").
@@ -218,8 +228,10 @@ func Run() {
 	pSpinnerChan := make(chan string)
 	stopChan := make(chan bool)
 	pStopChan := make(chan bool)
+	var logLock sync.Mutex
 	onLog := func(s string) {
 		go func() {
+			logLock.Lock()
 			pStopChan = stopChan
 			stopChan = make(chan bool)
 			pSpinnerChan = spinnerChan
@@ -232,11 +244,13 @@ func Run() {
 			}
 			logs.SetCellSimple(row, 0, "|")
 			logs.SetCellSimple(row, 1, s)
+			log.Printf("writing %d %s", row, s)
+			idx := row
 			row++
 			t.OnUpdate <- true
+			logLock.Unlock()
 			go spinner.Timer(100*time.Millisecond, spinnerChan, stopChan)
 			for {
-				idx := row - 1
 				myS, ok := <-spinnerChan
 				if ok {
 					logs.SetCell(idx, 0, tview.NewTableCell(myS).SetAlign(tview.AlignRight))
