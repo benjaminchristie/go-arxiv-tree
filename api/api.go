@@ -126,7 +126,7 @@ func parseQueryRequest(q QueryRequest) (string, error) {
 		return cachedValue.(string), nil
 	}
 	if q.Title != "" {
-		s += fmt.Sprintf("search_query=ti:%s", q.Title)
+		s += fmt.Sprintf("search_query=ti:%s", strings.Replace(q.Title, ":", "", -1))
 		use_amp = true
 	} else if q.Author != "" {
 		s += fmt.Sprintf("search_query=au:%s", q.Author)
@@ -281,6 +281,70 @@ func DownloadSource(id, outfile string) error {
 	return nil
 }
 
+func TuiDownloadSource(id, outfile string, netchan chan string) error {
+	var err error
+	var resp *http.Response
+	var body []byte
+
+	idx := strings.LastIndex(outfile, "/")
+	if idx != -1 {
+		err = os.MkdirAll(outfile[0:idx], 0755)
+		if err != nil {
+			return err
+		}
+	}
+	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/src/%s", id))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusOK {
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		netchan <- string(body)
+		err = os.WriteFile(outfile, body, 0644)
+		if err != nil {
+			os.Remove(outfile)
+			return err
+		}
+	} else {
+		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
+	}
+	return nil
+}
+func TuiDownloadPDF(id, outfile string, netchan chan string) error {
+	var err error
+	var resp *http.Response
+	var body []byte
+
+	idx := strings.LastIndex(outfile, "/")
+	if idx != -1 {
+		err = os.MkdirAll(outfile[0:idx], 0755)
+		if err != nil {
+			return err
+		}
+	}
+	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/pdf/%s", id))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusOK {
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		netchan <- string(body)
+		err = os.WriteFile(outfile, body, 0644)
+		if err != nil {
+			os.Remove(outfile)
+			return err
+		}
+	} else {
+		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
+	}
+	return nil
+}
 func DownloadPDF(id, outfile string) error {
 	var err error
 	var resp *http.Response
