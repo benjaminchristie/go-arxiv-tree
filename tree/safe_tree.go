@@ -9,12 +9,10 @@ import (
 	"sync"
 
 	"github.com/benjaminchristie/go-arxiv-tree/api"
-	"github.com/dominikbraun/graph"
-	"github.com/dominikbraun/graph/draw"
 	"github.com/jschaf/bibtex"
 )
 
-func tuiGetInfos(info NodeInfo, netchan chan api.NetData) ([]NodeInfo, error) {
+func safeTuiGetInfos(info NodeInfo, netchan chan api.NetData) ([]NodeInfo, error) {
 	var entries []bibtex.Entry
 	var err error
 	if info.BibPath == "" { // bib probably not downloaded
@@ -24,7 +22,7 @@ func tuiGetInfos(info NodeInfo, netchan chan api.NetData) ([]NodeInfo, error) {
 		}
 		filename := fh.Name()
 		info.SourcePath = filename
-		err = api.TuiDownloadSource(info.ID, filename, netchan)
+		err = api.SafeTuiDownloadSource(info.ID, filename, netchan)
 		if err != nil {
 			return nil, err
 		}
@@ -64,7 +62,7 @@ func tuiGetInfos(info NodeInfo, netchan chan api.NetData) ([]NodeInfo, error) {
 	}
 	return infos, nil
 }
-func getInfos(info NodeInfo) ([]NodeInfo, error) {
+func safeGetInfos(info NodeInfo) ([]NodeInfo, error) {
 	var entries []bibtex.Entry
 	var err error
 	if info.BibPath == "" { // bib probably not downloaded
@@ -74,7 +72,7 @@ func getInfos(info NodeInfo) ([]NodeInfo, error) {
 		}
 		filename := fh.Name()
 		info.SourcePath = filename
-		err = api.DownloadSource(info.ID, filename)
+		err = api.SafeDownloadSource(info.ID, filename)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +113,7 @@ func getInfos(info NodeInfo) ([]NodeInfo, error) {
 	return infos, nil
 }
 
-func _populateTree(n *Node, depth int, dolog bool, wg *sync.WaitGroup) {
+func _safePopulateTree(n *Node, depth int, dolog bool, wg *sync.WaitGroup) {
 	if depth <= 0 {
 		return
 	}
@@ -124,7 +122,7 @@ func _populateTree(n *Node, depth int, dolog bool, wg *sync.WaitGroup) {
 		ti := n.Info.Title
 		log.Printf("Populating %d-Tree for %.20s: %.60s", depth, au, ti)
 	}
-	infos, err := getInfos(n.Info)
+	infos, err := safeGetInfos(n.Info)
 	if err != nil {
 		log.Printf("error in _populateTree: %v %v", n.Info, err)
 		return
@@ -139,14 +137,14 @@ func _populateTree(n *Node, depth int, dolog bool, wg *sync.WaitGroup) {
 		workerPool <- true
 		wg.Add(1)
 		go func(c *Node) {
-			_populateTree(c, depth-1, dolog, wg)
+			_safePopulateTree(c, depth-1, dolog, wg)
 			wg.Done()
 			<-workerPool
 		}(n.Cites[i])
 	}
 }
 
-func _asyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan chan string, netchan chan api.NetData, prefix string, cb func(n *Node)) {
+func _safeAsyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan chan string, netchan chan api.NetData, prefix string, cb func(n *Node)) {
 	au := n.Info.Author
 	ti := n.Info.Title
 	pdfStr := fmt.Sprintf("%s%.20s: %.60s", prefix, au, ti)
@@ -155,7 +153,7 @@ func _asyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan c
 	if depth <= 0 {
 		return
 	}
-	infos, err := tuiGetInfos(n.Info, netchan)
+	infos, err := safeTuiGetInfos(n.Info, netchan)
 	pdfchan <- pdfStr
 	if err != nil {
 		return
@@ -170,62 +168,21 @@ func _asyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan c
 		workerPool <- true
 		wg.Add(1)
 		go func(node *Node) {
-			_asyncLoggingPopulateTree(node, depth-1, wg, pdfchan, netchan, prefix+"-> ", cb)
+			_safeAsyncLoggingPopulateTree(node, depth-1, wg, pdfchan, netchan, prefix+"-> ", cb)
 			wg.Done()
 			<-workerPool
 		}(n.Cites[i])
 	}
 }
 
-func PopulateTree(n *Node, depth int, dolog bool) {
+func SafePopulateTree(n *Node, depth int, dolog bool) {
 	var wg sync.WaitGroup
-	_populateTree(n, depth, dolog, &wg)
+	_safePopulateTree(n, depth, dolog, &wg)
 	wg.Wait()
 }
 
-func AsyncLoggingPopulateTree(n *Node, depth int, pdfchan chan string, netchan chan api.NetData, cb func(n *Node)) {
+func SafeAsyncLoggingPopulateTree(n *Node, depth int, pdfchan chan string, netchan chan api.NetData, cb func(n *Node)) {
 	var wg sync.WaitGroup
-	_asyncLoggingPopulateTree(n, depth, &wg, pdfchan, netchan, "", cb)
+	_safeAsyncLoggingPopulateTree(n, depth, &wg, pdfchan, netchan, "", cb)
 	wg.Wait()
-}
-
-func Traverse(n *Node, cb func(*Node)) {
-	cb(n)
-	for _, c := range n.Cites {
-		Traverse(c, cb)
-	}
-}
-
-func Visualize(n *Node, filename string) error {
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	if n == nil {
-		return nil
-	}
-	g := graph.New(graph.StringHash, graph.Directed())
-	cb := func(c *Node) {
-		if c == nil {
-			return
-		}
-		t := c.Info.Title
-		h_t := c.Head.Info.Title
-		g.AddVertex(t)
-		g.AddEdge(h_t, t)
-	}
-	t := n.Info.Title
-	g.AddVertex(t)
-	Traverse(n, cb)
-	err = draw.DOT(g, file)
-	return err
-}
-
-func contains(v *[]*Node, c *Node) bool {
-	for _, e := range *v {
-		if c == e {
-			return true
-		}
-	}
-	return false
 }

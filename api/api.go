@@ -285,7 +285,6 @@ func DownloadSource(id, outfile string) error {
 	}
 	return nil
 }
-
 func TuiDownloadSource(id, outfile string, netchan chan NetData) error {
 	var err error
 	var resp *http.Response
