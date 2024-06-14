@@ -2,7 +2,7 @@ package tui
 
 import (
 	"log"
-	"time"
+	"sync"
 
 	"github.com/benjaminchristie/go-arxiv-tree/tree"
 	"github.com/gdamore/tcell/v2"
@@ -13,6 +13,7 @@ type TreeDisplay struct {
 	ArxivTree  *tree.Node
 	TviewTree  *tview.TreeView
 	UpdateChan chan bool
+	Mutex      sync.Mutex
 }
 
 type CustomNode struct {
@@ -30,20 +31,15 @@ func makeTreeDisplay(head *tree.Node) *TreeDisplay {
 	if head != nil {
 		root := tview.NewTreeNode(head.Info.Title).
 			SetColor(tcell.ColorRed)
+		tree := tview.NewTreeView().SetRoot(root).SetCurrentNode(root)
 		t = &TreeDisplay{
 			ArxivTree:  head,
-			TviewTree:  tview.NewTreeView(),
+			TviewTree:  tree,
 			UpdateChan: make(chan bool),
 		}
 		add(root, head)
 	} else {
-		root := tview.NewTreeNode("").
-			SetColor(tcell.ColorRed)
-		t = &TreeDisplay{
-			ArxivTree:  head,
-			TviewTree:  tview.NewTreeView().SetRoot(root).SetCurrentNode(root),
-			UpdateChan: make(chan bool),
-		}
+		panic("Invalid head for treeDisplay")
 	}
 	t.TviewTree.SetSelectedFunc(func(node *tview.TreeNode) {
 		ref := node.GetReference()
@@ -71,15 +67,14 @@ func add(target *tview.TreeNode, node *tree.Node) {
 		return
 	}
 	for _, child := range node.Cites {
-		log.Printf("Adding %v to tree", child)
 		hasChildren := len(child.Cites) != 0
 		node := tview.NewTreeNode(child.Info.Title).
 			SetReference(child).
-			SetSelectable(hasChildren)
+			SetSelectable(true)
+		target.AddChild(node)
 		if hasChildren {
 			node.SetColor(tcell.ColorGreen)
 		}
-		target.AddChild(node)
 	}
 }
 
@@ -110,14 +105,20 @@ func findNode(t *tree.Node, isTrue func(*tree.Node) bool) *tree.Node {
 }
 
 func render(t *TreeDisplay) {
-	if t.TviewTree != nil && t.ArxivTree != nil {
-		refresh(t.TviewTree.GetRoot(), t.ArxivTree.Head)
+	t.Mutex.Lock()
+	defer t.Mutex.Unlock()
+	if t.TviewTree != nil {
+		refresh(t.TviewTree.GetRoot(), t.ArxivTree)
 	}
 }
 
 func refresh(target *tview.TreeNode, node *tree.Node) {
-	if target == nil || node == nil {
-		log.Printf("Target or node is nil")
+	if target == nil {
+		log.Printf("Target is nil")
+		return
+	}
+	if node == nil {
+		log.Printf("Node is nil")
 		return
 	}
 	target = target.ClearChildren()
@@ -125,10 +126,8 @@ func refresh(target *tview.TreeNode, node *tree.Node) {
 }
 
 func spin(t *TreeDisplay) {
-	ticker := time.NewTicker(1 * time.Second)
 	for {
-		// <-t.UpdateChan
-		<-ticker.C
+		<-t.UpdateChan
 		render(t)
 	}
 }

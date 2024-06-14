@@ -28,7 +28,6 @@ type FormData struct {
 
 type TUI struct {
 	App          *tview.Application
-	Display      *TreeDisplay
 	OnUpdate     chan bool
 	OnFormSubmit chan FormData
 	LogChan      chan string
@@ -38,6 +37,12 @@ type TUI struct {
 }
 
 var f *os.File
+
+var grid *tview.Grid
+
+var treeUpdateChan chan bool
+
+var treeDisplay *TreeDisplay
 
 func init() {
 	var err error
@@ -117,7 +122,11 @@ func formSubmit(t *TUI, f FormData) {
 		t.App.Stop()
 	}
 
-	t.Display = updateHead(t.Display, t.Head)
+	treeDisplay = makeTreeDisplay(t.Head)
+
+	treeUpdateChan = treeDisplay.UpdateChan
+	treeDisplay.TviewTree.SetBorder(true).SetBorderColor(tcell.ColorOrangeRed).SetTitle("Current Tree")
+	grid.AddItem(treeDisplay.TviewTree, 0, 2, 2, 2, 0, 100, true)
 
 	err = os.MkdirAll(f.OutputDir, 0755)
 	if err != nil {
@@ -165,8 +174,6 @@ func Run() {
 		LogChan:      make(chan string, 100),
 		PdfChan:      make(chan string, 100),
 		NetChan:      make(chan api.NetData, 100),
-		Head:         nil,
-		Display:      makeTreeDisplay(nil),
 	}
 	form := tview.NewForm().
 		SetFieldTextColor(tcell.ColorGhostWhite).
@@ -231,7 +238,7 @@ func Run() {
 		SetTitleColor(tcell.ColorOrangeRed).
 		SetBorderColor(tcell.ColorGhostWhite)
 
-	grid := tview.NewGrid()
+	grid = tview.NewGrid()
 
 	logs := tview.NewTable()
 	logs.SetBorder(true).
@@ -265,16 +272,12 @@ func Run() {
 	_, _, sparklineNetWidth, _ := sparkLineNet.GetInnerRect()
 	sparklineNetWidth *= 8
 
-	t.Display.TviewTree.SetBorder(true).
-		SetBorderColor(tcell.ColorOrangeRed).
-		SetTitle("Current Tree")
-
 	grid.AddItem(logs, 2, 2, 1, 2, 0, 100, false).
 		AddItem(pdfs, 3, 2, 1, 2, 0, 100, false).
 		AddItem(form, 0, 0, 2, 2, 0, 100, true).
 		AddItem(netPage, 2, 0, 1, 2, 0, 100, false).
-		AddItem(sparkLineNet, 3, 0, 1, 2, 0, 100, false).
-		AddItem(t.Display.TviewTree, 0, 2, 2, 2, 0, 100, false)
+		AddItem(sparkLineNet, 3, 0, 1, 2, 0, 100, false)
+		// AddItem(t.Display.TviewTree, 0, 2, 2, 2, 0, 100, false)
 		// AddItem(sparkLineIO, 3, 0, 1, 1, 0, 100, false).
 
 	onUpdate := func() {
@@ -290,6 +293,16 @@ func Run() {
 	var logLock sync.Mutex
 	onLog := func(s string) {
 		go func() {
+			if treeUpdateChan != nil {
+				go func() {
+					for {
+						if t.App.GetFocus() != treeDisplay.TviewTree {
+							break
+						}
+					}
+					treeUpdateChan <- true
+				}()
+			}
 			logLock.Lock()
 			pStopChan = stopChan
 			stopChan = make(chan bool)
