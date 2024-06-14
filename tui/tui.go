@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -16,7 +17,6 @@ import (
 	"github.com/navidys/tvxwidgets"
 	"github.com/rivo/tview"
 )
-
 
 type FormData struct {
 	QueryType  string
@@ -290,7 +290,8 @@ func Run() {
 	}
 
 	var netLock sync.Mutex
-	networkUsage := make([]float64, 0)
+
+	networkUsage := make([]float64, sparklineNetWidth)
 	onNet := func(n api.NetData) {
 		go func() {
 			netLock.Lock()
@@ -298,10 +299,7 @@ func Run() {
 			sl := s[0:min(len(s), 4096)]
 			netPage.SetText(sl, false)
 			usage := float64(n.Size)
-			networkUsage = append(networkUsage, usage)
-			if len(networkUsage) > sparklineNetWidth {
-				networkUsage = networkUsage[1:]
-			}
+			fastAppend(networkUsage, usage)
 			sparkLineNet.SetData(networkUsage)
 			t.OnUpdate <- true
 			netLock.Unlock()
@@ -313,4 +311,17 @@ func Run() {
 		t.App.Stop()
 		panic(err)
 	}
+}
+
+func fastAppend(s []float64, v float64) error {
+	var i int
+	l := len(s)
+	if l == 0 {
+		return errors.New("Empty slice passed to fastAppend")
+	}
+	for i = 1; i < l; i++ {
+		s[i-1] = s[i]
+	}
+	s[l-1] = v
+	return nil
 }
