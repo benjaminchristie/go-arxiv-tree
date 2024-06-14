@@ -133,14 +133,17 @@ func MakeNode(e bibtex.Entry, downloadSource bool, s ...string) (*Node, error) {
 	}
 	return node, err
 }
-func tuiMakeNodeFromXHelper(node *Node, p api.QueryRequest, netchan chan string) (*Node, error) {
+func tuiMakeNodeFromXHelper(node *Node, p api.QueryRequest, netchan chan api.NetData) (*Node, error) {
 	var x string
 	var err error
 	x, err = api.Query(p)
 	if err != nil {
 		return node, err
 	}
-	netchan <- x
+	netchan <- api.NetData{
+		Message: x,
+		Size:    len(x),
+	}
 	xmlEntry := api.ParseXML(x)
 	if len(xmlEntry) == 0 {
 		return node, errors.New("Parsing XML Failed")
@@ -309,7 +312,7 @@ func MakeNodeFromTitle(id string) (*Node, error) {
 	}
 	return makeNodeFromXHelper(node, p)
 }
-func TuiMakeNodeFromID(id string, netchan chan string) (*Node, error) {
+func TuiMakeNodeFromID(id string, netchan chan api.NetData) (*Node, error) {
 	info := NodeInfo{
 		Entry:      bibtex.Entry{},
 		Author:     "",
@@ -329,7 +332,7 @@ func TuiMakeNodeFromID(id string, netchan chan string) (*Node, error) {
 	return tuiMakeNodeFromXHelper(node, p, netchan)
 }
 
-func TuiMakeNodeFromAuthor(id string, netchan chan string) (*Node, error) {
+func TuiMakeNodeFromAuthor(id string, netchan chan api.NetData) (*Node, error) {
 	info := NodeInfo{
 		Entry:      bibtex.Entry{},
 		Author:     "",
@@ -349,7 +352,7 @@ func TuiMakeNodeFromAuthor(id string, netchan chan string) (*Node, error) {
 	return tuiMakeNodeFromXHelper(node, p, netchan)
 }
 
-func TuiMakeNodeFromTitle(id string, netchan chan string) (*Node, error) {
+func TuiMakeNodeFromTitle(id string, netchan chan api.NetData) (*Node, error) {
 	info := NodeInfo{
 		Entry:      bibtex.Entry{},
 		Author:     "",

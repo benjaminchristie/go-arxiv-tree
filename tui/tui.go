@@ -12,9 +12,11 @@ import (
 
 	"github.com/benjaminchristie/go-arxiv-tree/api"
 	"github.com/benjaminchristie/go-arxiv-tree/tree"
+	"github.com/gdamore/tcell/v2"
 	"github.com/navidys/tvxwidgets"
 	"github.com/rivo/tview"
 )
+
 
 type FormData struct {
 	QueryType  string
@@ -29,7 +31,7 @@ type TUI struct {
 	OnFormSubmit chan FormData
 	LogChan      chan string
 	PdfChan      chan string
-	NetChan      chan string
+	NetChan      chan api.NetData
 	Head         *tree.Node
 }
 
@@ -44,7 +46,7 @@ func init() {
 	log.SetOutput(f)
 }
 
-func listen(t *TUI, onFormSubmitCB func(*TUI, FormData), onUpdateCB func(), onLogCB func(string), onPdfCB func(string), onNetCB func(string)) {
+func listen(t *TUI, onFormSubmitCB func(*TUI, FormData), onUpdateCB func(), onLogCB func(string), onPdfCB func(string), onNetCB func(api.NetData)) {
 	for {
 		select {
 		case m0 := <-t.OnFormSubmit:
@@ -137,9 +139,14 @@ func Run() {
 		OnFormSubmit: make(chan FormData, 100),
 		LogChan:      make(chan string, 100),
 		PdfChan:      make(chan string, 100),
-		NetChan:      make(chan string, 100),
+		NetChan:      make(chan api.NetData, 100),
 	}
 	form := tview.NewForm().
+		SetFieldTextColor(tcell.ColorGhostWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetLabelColor(tcell.ColorOrangeRed).
+		SetButtonTextColor(tcell.ColorOrangeRed).
+		SetButtonBackgroundColor(tcell.ColorBlack).
 		AddTextView("ArXiv Tree", "Welcome to ArXiv tree. Enter your search criteria below.", 0, 2, true, false).
 		AddDropDown("Search by: ", []string{"ID", "Author", "Title"}, 2,
 			func(option string, _ int) {
@@ -182,22 +189,30 @@ func Run() {
 		})
 	form.SetBorder(true).
 		SetTitle("Query").
-		SetTitleAlign(tview.AlignCenter)
+		SetTitleAlign(tview.AlignCenter).
+		SetTitleColor(tcell.ColorOrangeRed).
+		SetBorderColor(tcell.ColorGhostWhite)
 
 	grid := tview.NewGrid()
 
 	logs := tview.NewTable()
 	logs.SetBorder(true).
 		SetTitle("Logs").
+		SetBorderColor(tcell.ColorOrangeRed).
+		SetTitleColor(tcell.ColorGhostWhite).
 		SetTitleAlign(tview.AlignCenter)
 	pdfs := tview.NewTable()
 	pdfs.SetBorder(true).
 		SetTitle("PDFs").
+		SetBorderColor(tcell.ColorOrangeRed).
+		SetTitleColor(tcell.ColorGhostWhite).
 		SetTitleAlign(tview.AlignCenter)
 
 	netPage := tview.NewTextArea()
 	netPage.SetBorder(true).
 		SetTitle("Network").
+		SetBorderColor(tcell.ColorOrangeRed).
+		SetTitleColor(tcell.ColorGhostWhite).
 		SetTitleAlign(tview.AlignCenter)
 
 		// 	sparkLineIO := tvxwidgets.NewSparkline()
@@ -206,10 +221,11 @@ func Run() {
 
 	sparkLineNet := tvxwidgets.NewSparkline()
 	sparkLineNet.SetBorder(true).
+		SetBorderColor(tcell.ColorOrangeRed).
 		SetTitle("Network IO")
 
 	_, _, sparklineNetWidth, _ := sparkLineNet.GetInnerRect()
-	sparklineNetWidth *= 10
+	sparklineNetWidth *= 8
 
 	grid.AddItem(logs, 0, 2, 2, 2, 0, 100, false).
 		AddItem(pdfs, 2, 2, 2, 2, 0, 100, false).
@@ -275,11 +291,13 @@ func Run() {
 
 	var netLock sync.Mutex
 	networkUsage := make([]float64, 0)
-	onNet := func(s string) {
+	onNet := func(n api.NetData) {
 		go func() {
 			netLock.Lock()
-			netPage.SetText(s[0:max(len(s), 4096)], false)
-			usage := float64(len(s))
+			s := n.Message
+			sl := s[0:min(len(s), 4096)]
+			netPage.SetText(sl, false)
+			usage := float64(n.Size)
 			networkUsage = append(networkUsage, usage)
 			if len(networkUsage) > sparklineNetWidth {
 				networkUsage = networkUsage[1:]

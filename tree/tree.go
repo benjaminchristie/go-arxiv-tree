@@ -14,7 +14,7 @@ import (
 	"github.com/jschaf/bibtex"
 )
 
-func tuiGetInfos(info NodeInfo, netchan chan string) ([]NodeInfo, error) {
+func tuiGetInfos(info NodeInfo, netchan chan api.NetData) ([]NodeInfo, error) {
 	var entries []bibtex.Entry
 	var err error
 	if info.BibPath == "" { // bib probably not downloaded
@@ -146,16 +146,16 @@ func _populateTree(n *Node, depth int, dolog bool, wg *sync.WaitGroup) {
 	}
 }
 
-func _asyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan chan string, netchan chan string, prefix string, cb func(n *Node)) {
+func _asyncLoggingPopulateTree(n *Node, depth int, wg *sync.WaitGroup, pdfchan chan string, netchan chan api.NetData, prefix string, cb func(n *Node)) {
 	au := n.Info.Author
 	ti := n.Info.Title
 	pdfStr := fmt.Sprintf("%s%.20s: %.60s", prefix, au, ti)
-	pdfchan <- pdfStr
 	log.Printf(pdfStr)
 	go cb(n)
 	if depth <= 0 {
 		return
 	}
+	pdfchan <- pdfStr
 	infos, err := tuiGetInfos(n.Info, netchan)
 	if err != nil {
 		return
@@ -183,7 +183,7 @@ func PopulateTree(n *Node, depth int, dolog bool) {
 	wg.Wait()
 }
 
-func AsyncLoggingPopulateTree(n *Node, depth int, pdfchan chan string, netchan chan string, cb func(n *Node)) {
+func AsyncLoggingPopulateTree(n *Node, depth int, pdfchan chan string, netchan chan api.NetData, cb func(n *Node)) {
 	var wg sync.WaitGroup
 	_asyncLoggingPopulateTree(n, depth, &wg, pdfchan, netchan, "", cb)
 	wg.Wait()

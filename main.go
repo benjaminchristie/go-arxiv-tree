@@ -13,7 +13,6 @@ import (
 	"github.com/benjaminchristie/go-arxiv-tree/tui"
 )
 
-
 func main() {
 	var id string
 	var depth int

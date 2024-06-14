@@ -57,6 +57,11 @@ type QueryRequest struct {
 	Cat        string // category to search
 }
 
+type NetData struct {
+	Message string
+	Size    int
+}
+
 var tarExtractRegexpHelper *regexp.Regexp
 
 const ARXIV_API = "https://export.arxiv.org/api"
@@ -281,7 +286,7 @@ func DownloadSource(id, outfile string) error {
 	return nil
 }
 
-func TuiDownloadSource(id, outfile string, netchan chan string) error {
+func TuiDownloadSource(id, outfile string, netchan chan NetData) error {
 	var err error
 	var resp *http.Response
 	var body []byte
@@ -302,7 +307,10 @@ func TuiDownloadSource(id, outfile string, netchan chan string) error {
 		if err != nil {
 			return err
 		}
-		netchan <- string(body)
+		netchan <- NetData{
+			Message: fmt.Sprintf("Binary Data for %s: %s", outfile, id),
+			Size:    len(body),
+		}
 		err = os.WriteFile(outfile, body, 0644)
 		if err != nil {
 			os.Remove(outfile)
@@ -313,7 +321,7 @@ func TuiDownloadSource(id, outfile string, netchan chan string) error {
 	}
 	return nil
 }
-func TuiDownloadPDF(id, outfile string, netchan chan string) error {
+func TuiDownloadPDF(id, outfile string, netchan chan NetData) error {
 	var err error
 	var resp *http.Response
 	var body []byte
@@ -334,7 +342,10 @@ func TuiDownloadPDF(id, outfile string, netchan chan string) error {
 		if err != nil {
 			return err
 		}
-		netchan <- string(body)
+		netchan <- NetData{
+			Message: fmt.Sprintf("Binary Data for %s: %s", outfile, id),
+			Size:    len(body),
+		}
 		err = os.WriteFile(outfile, body, 0644)
 		if err != nil {
 			os.Remove(outfile)
