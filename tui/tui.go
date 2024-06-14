@@ -23,10 +23,12 @@ type FormData struct {
 	QueryValue string
 	TreeDepth  int
 	OutputDir  string
+	SafeQuery  bool
 }
 
 type TUI struct {
 	App          *tview.Application
+	Display      *TreeDisplay
 	OnUpdate     chan bool
 	OnFormSubmit chan FormData
 	LogChan      chan string
@@ -68,18 +70,17 @@ func formSubmit(t *TUI, f FormData) {
 	t.LogChan <- "Initializing Search Tree"
 
 	defer func() {
-		log.Printf("in defer")
-		go func() {
-			log.Printf("in defer 1")
-			time.Sleep(500 * time.Millisecond)
-			log.Printf("out defer 1")
-			t.LogChan <- "Awaiting new Query"
-		}()
+		time.Sleep(1 * time.Second)
+		t.LogChan <- "Awaiting new Query"
 	}()
 
 	switch f.QueryType {
 	case "ID":
-		t.Head, err = tree.TuiMakeNodeFromID(f.QueryValue, t.NetChan)
+		if f.SafeQuery {
+			t.Head, err = tree.SafeTuiMakeNodeFromID(f.QueryValue, t.NetChan)
+		} else {
+			t.Head, err = tree.TuiMakeNodeFromID(f.QueryValue, t.NetChan)
+		}
 		if err != nil {
 			log.Print(err)
 			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
@@ -87,7 +88,11 @@ func formSubmit(t *TUI, f FormData) {
 		}
 		break
 	case "Author":
-		t.Head, err = tree.TuiMakeNodeFromAuthor(f.QueryValue, t.NetChan)
+		if f.SafeQuery {
+			t.Head, err = tree.SafeTuiMakeNodeFromAuthor(f.QueryValue, t.NetChan)
+		} else {
+			t.Head, err = tree.TuiMakeNodeFromAuthor(f.QueryValue, t.NetChan)
+		}
 		if err != nil {
 			log.Print(err)
 			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
@@ -95,7 +100,11 @@ func formSubmit(t *TUI, f FormData) {
 		}
 		break
 	case "Title":
-		t.Head, err = tree.TuiMakeNodeFromTitle(f.QueryValue, t.NetChan)
+		if f.SafeQuery {
+			t.Head, err = tree.SafeTuiMakeNodeFromTitle(f.QueryValue, t.NetChan)
+		} else {
+			t.Head, err = tree.TuiMakeNodeFromTitle(f.QueryValue, t.NetChan)
+		}
 		if err != nil {
 			log.Print(err)
 			t.LogChan <- fmt.Sprintf("Error: %s", err.Error())
@@ -108,22 +117,37 @@ func formSubmit(t *TUI, f FormData) {
 		t.App.Stop()
 	}
 
+	t.Display = updateHead(t.Display, t.Head)
+
 	err = os.MkdirAll(f.OutputDir, 0755)
 	if err != nil {
 		t.LogChan <- "Could not create directory " + f.OutputDir
 		return
 	}
 	downloadpdf := func(n *tree.Node) {
+		var localErr error
 		if n.Info.ID != "" {
+			formatted := fmt.Sprintf("%s/%s_%s.pdf", f.OutputDir, strings.Replace(n.Info.Title, "/", "", -1), n.Info.ID)
+			if f.SafeQuery {
+				localErr = api.SafeTuiDownloadPDF(n.Info.ID, formatted, t.NetChan)
+			} else {
+				localErr = api.TuiDownloadPDF(n.Info.ID, formatted, t.NetChan)
+			}
+			if localErr != nil {
+				t.PdfChan <- fmt.Sprintf("Error downloading PDF %.40s", n.Info.Title)
+				return
+			}
 			m := fmt.Sprintf("PDF: %.20s: %.60s", n.Info.Author, n.Info.Title)
 			t.PdfChan <- m
-			formatted := fmt.Sprintf("%s/%s_%s.pdf", f.OutputDir, strings.Replace(n.Info.Title, "/", "", -1), n.Info.ID)
-			api.TuiDownloadPDF(n.Info.ID, formatted, t.NetChan)
 		} else {
 			t.PdfChan <- fmt.Sprintf("Could not download PDF %.40s", n.Info.Title)
 		}
 	}
-	tree.AsyncLoggingPopulateTree(t.Head, f.TreeDepth, t.LogChan, t.NetChan, downloadpdf)
+	if f.SafeQuery {
+		tree.SafeAsyncLoggingPopulateTree(t.Head, f.TreeDepth, t.LogChan, t.NetChan, downloadpdf)
+	} else {
+		tree.AsyncLoggingPopulateTree(t.Head, f.TreeDepth, t.LogChan, t.NetChan, downloadpdf)
+	}
 	// tree.Traverse(t.Head, downloadpdf)
 	// t.LogChan <- "Outputing graph view to %s. Run `dot -Tsvg output.gv -o <file>` to view."
 	// tree.Visualize(t.Head, "output.gv")
@@ -133,6 +157,7 @@ func Run() {
 	defer f.Close()
 	queryType, searchQuery, saveDir := "Title", "sample query", "arxiv-download-folder"
 	treeDepth := 1
+	safeQuery := false
 	t := &TUI{
 		App:          tview.NewApplication(),
 		OnUpdate:     make(chan bool, 100),
@@ -140,6 +165,8 @@ func Run() {
 		LogChan:      make(chan string, 100),
 		PdfChan:      make(chan string, 100),
 		NetChan:      make(chan api.NetData, 100),
+		Head:         nil,
+		Display:      makeTreeDisplay(nil),
 	}
 	form := tview.NewForm().
 		SetFieldTextColor(tcell.ColorGhostWhite).
@@ -147,13 +174,18 @@ func Run() {
 		SetLabelColor(tcell.ColorOrangeRed).
 		SetButtonTextColor(tcell.ColorOrangeRed).
 		SetButtonBackgroundColor(tcell.ColorBlack).
-		AddTextView("ArXiv Tree", "Welcome to ArXiv tree. Enter your search criteria below.", 0, 2, true, false).
+		AddTextView("ArXiv Tree",
+			"Welcome to ArXiv tree. Enter your search criteria below.\n"+
+				"ArXiv may temporarily ban your IP if you send more than one\n"+
+				"request every three seconds. Enable \"Avoid Rate Limit\" below\n"+
+				"to circumvent this. You may also use a VPN for heavy loads.",
+			0, 5, true, false).
 		AddDropDown("Search by: ", []string{"ID", "Author", "Title"}, 2,
 			func(option string, _ int) {
 				queryType = option
 			},
 		).
-		AddTextArea("Search Query: ", "sample query", 0, 0, 0,
+		AddTextArea("Search Query: ", "sample query", 0, 2, 0,
 			func(text string) {
 				searchQuery = text
 			},
@@ -172,6 +204,11 @@ func Run() {
 				}
 			},
 		).
+		AddCheckbox("Avoid Rate Limit: ", false,
+			func(checked bool) {
+				safeQuery = checked
+			},
+		).
 		AddButton("Start", func() {
 			go func() {
 				f := FormData{
@@ -179,6 +216,7 @@ func Run() {
 					QueryValue: searchQuery,
 					OutputDir:  saveDir,
 					TreeDepth:  treeDepth,
+					SafeQuery:  safeQuery,
 				}
 				t.OnFormSubmit <- f
 			}()
@@ -227,11 +265,16 @@ func Run() {
 	_, _, sparklineNetWidth, _ := sparkLineNet.GetInnerRect()
 	sparklineNetWidth *= 8
 
-	grid.AddItem(logs, 0, 2, 2, 2, 0, 100, false).
-		AddItem(pdfs, 2, 2, 2, 2, 0, 100, false).
+	t.Display.TviewTree.SetBorder(true).
+		SetBorderColor(tcell.ColorOrangeRed).
+		SetTitle("Current Tree")
+
+	grid.AddItem(logs, 2, 2, 1, 2, 0, 100, false).
+		AddItem(pdfs, 3, 2, 1, 2, 0, 100, false).
 		AddItem(form, 0, 0, 2, 2, 0, 100, true).
 		AddItem(netPage, 2, 0, 1, 2, 0, 100, false).
-		AddItem(sparkLineNet, 3, 0, 1, 2, 0, 100, false)
+		AddItem(sparkLineNet, 3, 0, 1, 2, 0, 100, false).
+		AddItem(t.Display.TviewTree, 0, 2, 2, 2, 0, 100, false)
 		// AddItem(sparkLineIO, 3, 0, 1, 1, 0, 100, false).
 
 	onUpdate := func() {
@@ -307,7 +350,7 @@ func Run() {
 	}
 
 	go listen(t, formSubmit, onUpdate, onLog, onPdf, onNet)
-	if err := t.App.SetRoot(grid, true).EnableMouse(false).Run(); err != nil {
+	if err := t.App.SetRoot(grid, true).EnableMouse(true).Run(); err != nil {
 		t.App.Stop()
 		panic(err)
 	}
