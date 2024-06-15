@@ -1,4 +1,4 @@
-package tui
+package components
 
 import (
 	"time"
@@ -47,3 +47,4 @@ func (s *Spinner) Timer(t time.Duration, c chan string, stop chan bool) {
 		}
 	}
 }
+

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	log "github.com/benjaminchristie/go-arxiv-tree/arxiv_logger"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/benjaminchristie/go-arxiv-tree/cache"
+	"github.com/benjaminchristie/go-arxiv-tree/comms"
+	ratelimiter "github.com/benjaminchristie/go-arxiv-tree/rate_limiter"
 	"github.com/jschaf/bibtex"
 	"github.com/jschaf/bibtex/ast"
 )
@@ -67,6 +69,8 @@ var tarExtractRegexpHelper *regexp.Regexp
 const ARXIV_API = "https://export.arxiv.org/api"
 
 var queryCache *cache.Cache
+var targzCache *cache.Cache
+var downlCache *cache.Cache
 
 var biber *bibtex.Biber
 
@@ -78,6 +82,8 @@ func init() {
 	}
 	biber = &bibtex.Biber{}
 	queryCache = &cache.Cache{}
+	targzCache = &cache.Cache{}
+	downlCache = &cache.Cache{}
 }
 
 func ParseXML(s string) []Entry {
@@ -188,6 +194,7 @@ func Query(req QueryRequest) (string, error) {
 	if t != nil {
 		return t.(string), nil
 	}
+	ratelimiter.WaitIfEnabled()
 	resp, err := http.Get(req_url)
 	if err != nil {
 		return "", err
@@ -205,13 +212,17 @@ func Query(req QueryRequest) (string, error) {
 	return "", err
 }
 
-func ExtractTargz(infile, outdir string) error {
+func ExtractTargz(infile, outdir string, comms ...comms.Comm) error {
 	var err error
 	var r *os.File
 	var gzipStream *gzip.Reader
 	var tarStream *tar.Reader
 	var header *tar.Header
 
+	stored := queryCache.Get(infile + outdir)
+	if stored != nil {
+		return nil
+	}
 	r, err = os.Open(infile)
 	if err != nil {
 		return err
@@ -246,18 +257,28 @@ func ExtractTargz(infile, outdir string) error {
 			if err != nil {
 				return err
 			}
+			fn := file.Name()
+			for _, c := range comms {
+				c.Send(fn)
+			}
 		default:
 			return errors.New(fmt.Sprintf("Unknown type in extractTargz: %v in %s", header.Typeflag, header.Name))
 		}
 	}
+	queryCache.Set(infile + outdir, true)
 	return nil
 }
 
 // downloads tar.gz formatted source code
-func DownloadSource(id, outfile string) error {
+func DownloadSource(id, outfile string, comms ...comms.Comm) error {
 	var err error
 	var resp *http.Response
 	var body []byte
+
+	stored := downlCache.Get("SOURCE" + id + outfile)
+	if stored != nil {
+		return nil
+	}
 
 	idx := strings.LastIndex(outfile, "/")
 	if idx != -1 {
@@ -266,6 +287,7 @@ func DownloadSource(id, outfile string) error {
 			return err
 		}
 	}
+	ratelimiter.WaitIfEnabled()
 	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/src/%s", id))
 	if err != nil {
 		return err
@@ -275,40 +297,8 @@ func DownloadSource(id, outfile string) error {
 		if err != nil {
 			return err
 		}
-		err = os.WriteFile(outfile, body, 0644)
-		if err != nil {
-			os.Remove(outfile)
-			return err
-		}
-	} else {
-		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
-	}
-	return nil
-}
-func TuiDownloadSource(id, outfile string, netchan chan NetData) error {
-	var err error
-	var resp *http.Response
-	var body []byte
-
-	idx := strings.LastIndex(outfile, "/")
-	if idx != -1 {
-		err = os.MkdirAll(outfile[0:idx], 0755)
-		if err != nil {
-			return err
-		}
-	}
-	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/src/%s", id))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode == http.StatusOK {
-		body, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-		netchan <- NetData{
-			Message: fmt.Sprintf("Binary Data for %s: %s", outfile, id),
-			Size:    len(body),
+		for _, c := range comms {
+			go c.Send(string(body)) // c.Send blocks
 		}
 		err = os.WriteFile(outfile, body, 0644)
 		if err != nil {
@@ -316,15 +306,21 @@ func TuiDownloadSource(id, outfile string, netchan chan NetData) error {
 			return err
 		}
 	} else {
-		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
+		return errors.New(fmt.Sprintf("Status not ok for ID: %s Code:%d", id, resp.StatusCode))
 	}
+	downlCache.Set("SOURCE" + id + outfile, true)
 	return nil
 }
-func TuiDownloadPDF(id, outfile string, netchan chan NetData) error {
+
+func DownloadPDF(id, outfile string, comms ...comms.Comm) error {
 	var err error
 	var resp *http.Response
 	var body []byte
 
+	stored := downlCache.Get("PDF" + id + outfile)
+	if stored != nil {
+		return nil
+	}
 	idx := strings.LastIndex(outfile, "/")
 	if idx != -1 {
 		err = os.MkdirAll(outfile[0:idx], 0755)
@@ -332,6 +328,7 @@ func TuiDownloadPDF(id, outfile string, netchan chan NetData) error {
 			return err
 		}
 	}
+	ratelimiter.WaitIfEnabled()
 	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/pdf/%s", id))
 	if err != nil {
 		return err
@@ -341,9 +338,8 @@ func TuiDownloadPDF(id, outfile string, netchan chan NetData) error {
 		if err != nil {
 			return err
 		}
-		netchan <- NetData{
-			Message: fmt.Sprintf("Binary Data for %s: %s", outfile, id),
-			Size:    len(body),
+		for _, c := range comms {
+			go c.Send(string(body)) // c.Send blocks
 		}
 		err = os.WriteFile(outfile, body, 0644)
 		if err != nil {
@@ -351,38 +347,8 @@ func TuiDownloadPDF(id, outfile string, netchan chan NetData) error {
 			return err
 		}
 	} else {
-		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
+		return errors.New(fmt.Sprintf("Status not ok for ID: %s Code:%d", id, resp.StatusCode))
 	}
-	return nil
-}
-func DownloadPDF(id, outfile string) error {
-	var err error
-	var resp *http.Response
-	var body []byte
-
-	idx := strings.LastIndex(outfile, "/")
-	if idx != -1 {
-		err = os.MkdirAll(outfile[0:idx], 0755)
-		if err != nil {
-			return err
-		}
-	}
-	resp, err = http.Get(fmt.Sprintf("https://arxiv.org/pdf/%s", id))
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode == http.StatusOK {
-		body, err = io.ReadAll(resp.Body)
-		if err != nil {
-			return err
-		}
-		err = os.WriteFile(outfile, body, 0644)
-		if err != nil {
-			os.Remove(outfile)
-			return err
-		}
-	} else {
-		return errors.New(fmt.Sprintf("Status not ok for ID:%s Code:%d", id, resp.StatusCode))
-	}
+	downlCache.Set("PDF" + id + outfile, true)
 	return nil
 }
