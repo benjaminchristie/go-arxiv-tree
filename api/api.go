@@ -6,8 +6,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
-	"io"
 	log "github.com/benjaminchristie/go-arxiv-tree/arxiv_logger"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -265,7 +265,7 @@ func ExtractTargz(infile, outdir string, comms ...comms.Comm) error {
 			return errors.New(fmt.Sprintf("Unknown type in extractTargz: %v in %s", header.Typeflag, header.Name))
 		}
 	}
-	queryCache.Set(infile + outdir, true)
+	queryCache.Set(infile+outdir, true)
 	return nil
 }
 
@@ -308,7 +308,7 @@ func DownloadSource(id, outfile string, comms ...comms.Comm) error {
 	} else {
 		return errors.New(fmt.Sprintf("Status not ok for ID: %s Code:%d", id, resp.StatusCode))
 	}
-	downlCache.Set("SOURCE" + id + outfile, true)
+	downlCache.Set("SOURCE"+id+outfile, true)
 	return nil
 }
 
@@ -349,6 +349,6 @@ func DownloadPDF(id, outfile string, comms ...comms.Comm) error {
 	} else {
 		return errors.New(fmt.Sprintf("Status not ok for ID: %s Code:%d", id, resp.StatusCode))
 	}
-	downlCache.Set("PDF" + id + outfile, true)
+	downlCache.Set("PDF"+id+outfile, true)
 	return nil
 }

@@ -30,7 +30,7 @@ func (s *Spinner) Timer(t time.Duration, c chan string, stop chan bool) {
 	timer := time.NewTimer(t)
 	for {
 		select {
-		case _, ok:=<-timer.C:
+		case _, ok := <-timer.C:
 			if !ok {
 				close(c)
 				return
@@ -47,4 +47,3 @@ func (s *Spinner) Timer(t time.Duration, c chan string, stop chan bool) {
 		}
 	}
 }
-
