@@ -10,8 +10,8 @@ import (
 	"sync"
 
 	"github.com/benjaminchristie/go-arxiv-tree/api"
-	"github.com/benjaminchristie/go-arxiv-tree/comms"
 	log "github.com/benjaminchristie/go-arxiv-tree/arxiv_logger"
+	"github.com/benjaminchristie/go-arxiv-tree/comms"
 	"github.com/dominikbraun/graph"
 	"github.com/dominikbraun/graph/draw"
 	"github.com/jschaf/bibtex"
@@ -58,7 +58,7 @@ func MakeInfoFromQuery(info *ArxivTreeInfo, p api.QueryRequest, downloadSource b
 	}
 	xmlEntry := api.ParseXML(x)
 	if len(xmlEntry) == 0 {
-			return errors.New("Parsing XML Failed: you are probably temporarily banned")
+		return errors.New("Parsing XML Failed: you are probably temporarily banned")
 	}
 	fid := xmlEntry[0].ID
 	id := fid[strings.LastIndex(fid, "/")+1:]
@@ -302,10 +302,12 @@ func _populateTree(t *ArxivTree, depth int, wg *sync.WaitGroup, prefix string, c
 		wg.Done()
 	}()
 	if depth <= 0 {
+		log.Printf("Reached search depth at %s", t.Value.(ArxivTreeInfo).Title)
 		return
 	}
 	infos, err := getInfos(t.Value.(ArxivTreeInfo), comms...)
 	if err != nil {
+		log.Printf("Error in getInfos: %s", err.Error())
 		return
 	}
 	t.Children = make([]*ArxivTree, len(infos))

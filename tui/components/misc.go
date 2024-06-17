@@ -198,7 +198,6 @@ func MakeNet(c *comms.Comm) (*TUIPrimitive, *TUIPrimitive) {
 		log.Printf("In make net go")
 		for {
 			pS, ok := <-c.PublicChan
-			log.Printf("Got %v %v", pS, ok)
 			if !ok {
 				log.Printf("PublicChan closed")
 				continue
@@ -210,8 +209,7 @@ func MakeNet(c *comms.Comm) (*TUIPrimitive, *TUIPrimitive) {
 			}
 			lock.Lock()
 			s := m.Message
-			sl := s[0:min(len(s), 4096)]
-			netpage.Primitive.(*tview.TextArea).SetText(sl, false)
+			netpage.Primitive.(*tview.TextArea).SetText(s, false)
 			usage := float64(m.Size)
 			fastAppend(networkUsage, usage)
 			sparkline.Primitive.(*tvxwidgets.Sparkline).SetData(networkUsage)
@@ -225,13 +223,14 @@ func MakeTreeDisplayComponent(t *tree.ArxivTree, c *comms.Comm) *TUIPrimitive {
 	p := MakeTreeDisplay(t)
 
 	go func() {
-		for{
-			_, ok := <-c.PublicChan
+		for {
+			v, ok := <-c.PublicChan
+			log.Printf("in go func: %v", v)
 			if !ok {
 				log.Printf("PublicChan closed")
 				continue
 			}
-			p.UpdateChan <- true
+			p.UpdateChan <- v.(bool)
 		}
 	}()
 	return &TUIPrimitive{

@@ -68,8 +68,8 @@ func (t *TreeDisplay) render() {
 
 func (t *TreeDisplay) spin() {
 	for {
-		_, ok := <-t.UpdateChan
-		if ok {
+		focused, ok := <-t.UpdateChan
+		if ok && !focused {
 			t.render()
 		}
 	}

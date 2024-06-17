@@ -94,11 +94,17 @@ func MakeTUI() *TUI {
 	updateChan := make(chan bool)
 	formChan := make(chan FormData)
 
+	components := make([]*comps.TUIPrimitive, N_COMPONENTS)
+
 	tuiComms := make([][]comms.Comm, 3)
-	tuiComms[PDF_ARR_IDX] = make([]comms.Comm, 1)
+	tuiComms[PDF_ARR_IDX] = make([]comms.Comm, 2)
 	tuiComms[NET_ARR_IDX] = make([]comms.Comm, 1)
-	tuiComms[LOG_ARR_IDX] = make([]comms.Comm, 2)
+	tuiComms[LOG_ARR_IDX] = make([]comms.Comm, 1)
 	tuiComms[PDF_ARR_IDX][0] = *comms.MakeComm(0)
+	tuiComms[PDF_ARR_IDX][1] = *comms.MakeComm(0, func(i interface{}) interface{} {
+		return t.App.GetFocus() != components[TREE_IDX].Primitive
+	},
+	)
 	tuiComms[NET_ARR_IDX][0] = *comms.MakeComm(0, func(i interface{}) interface{} {
 		s, ok := i.(string)
 		if !ok {
@@ -106,19 +112,17 @@ func MakeTUI() *TUI {
 			return s
 		}
 		return api.NetData{
-			Message: s,
+			Message: s[:min(len(s), 1024)],
 			Size:    len(s),
 		}
 	})
 	tuiComms[LOG_ARR_IDX][0] = *comms.MakeComm(0)
-	tuiComms[LOG_ARR_IDX][1] = *comms.MakeComm(0)
 
-	components := make([]*comps.TUIPrimitive, N_COMPONENTS)
 	components[FORM_IDX] = comps.MakeForm(onDropDown, onSearch, onDir, onDepth, onLimit, onStart, onQuit)
 	components[LOG_IDX] = comps.MakeLogs(&tuiComms[LOG_ARR_IDX][0])
 	components[PDF_IDX] = comps.MakePDFLogs(&tuiComms[PDF_ARR_IDX][0])
 	components[LINE_IDX], components[NET_IDX] = comps.MakeNet(&tuiComms[NET_ARR_IDX][0])
-	components[TREE_IDX] = comps.MakeTreeDisplayComponent(nil, &tuiComms[LOG_ARR_IDX][1])
+	components[TREE_IDX] = comps.MakeTreeDisplayComponent(nil, &tuiComms[PDF_ARR_IDX][1])
 
 	t = &TUI{
 		App:            app,
@@ -210,6 +214,8 @@ func (t *TUI) formSubmit(f FormData) {
 	case "Title":
 		query.Title = f.QueryValue
 	}
+
+	log.Printf("Parsing query with parameters %s, depth: %d, output: %s", f.QueryValue, f.TreeDepth, f.OutputDir)
 	err = tree.MakeInfoFromQuery(&info, query, true, t.Comms[NET_ARR_IDX]...)
 	if err != nil {
 		log.Print(err)
@@ -231,6 +237,7 @@ func (t *TUI) formSubmit(f FormData) {
 		t.sendLogs("Error: %s", err.Error())
 		return
 	}
+	// callback to populateTree is goroutine
 	tree.PopulateTree(t.TreeHead, f.TreeDepth,
 		func(n *tree.ArxivTree) {
 			go t.sendLogs("Populating Tree for %s", n.Value.(tree.ArxivTreeInfo).Title)
